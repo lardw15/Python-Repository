@@ -1,0 +1,141 @@
+#Using Samsara API and Pandas
+
+import requests
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# ---------------------------
+# CONFIGURATION
+# ---------------------------
+
+"""
+SECURITY NOTICE
+
+All API tokens, IDs, and credentials in this repository are intentionally
+redacted or replaced with placeholder values. This project originally
+interfaced with live production APIs, but identifiers have been removed
+to comply with security best practices and prevent exposure of sensitive data.
+"""
+
+API_TOKEN = "REDACTED_API_TOKEN_PLACEHOLDER"
+VEHICLE_ID = "REDACTED_VEHICLE_ID_PLACEHOLDER"
+HEADERS = {"Authorization": f"Bearer {API_TOKEN}"}
+
+PHOENIX_TZ = ZoneInfo("America/Phoenix")
+
+# Conversion constants
+METER_TO_MILE = 0.000621371
+ML_TO_GALLON = 0.000264172
+
+# ---------------------------
+# FETCH TRIPS FUNCTION
+# ---------------------------
+def fetch_trips(vehicle_id, start_ms, end_ms):
+    url = "https://api.samsara.com/v1/fleet/trips"
+    params = {
+        "vehicleId": vehicle_id,
+        "startMs": start_ms,
+        "endMs": end_ms
+    }
+    response = requests.get(url, headers=HEADERS, params=params)
+    response.raise_for_status()
+    return response.json().get("trips", [])
+
+# ---------------------------
+# RUN FLEET ANALYSIS
+# ---------------------------
+def run_fleet_analysis(days=30):
+    now = datetime.now(PHOENIX_TZ)
+    start = now - timedelta(days=days)
+    start_ms = int(start.timestamp() * 1000)
+    end_ms = int(now.timestamp() * 1000)
+
+    trips = fetch_trips(VEHICLE_ID, start_ms, end_ms)
+
+    data = []
+    for trip in trips:
+        start_time = datetime.fromtimestamp(trip["startMs"]/1000, tz=PHOENIX_TZ)
+        end_time = datetime.fromtimestamp(trip["endMs"]/1000, tz=PHOENIX_TZ)
+        duration_min = (end_time - start_time).total_seconds() / 60
+        distance_miles = trip.get("distanceMeters",0) * METER_TO_MILE
+        fuel_gallons = trip.get("fuelConsumedMl",0) * ML_TO_GALLON
+        mpg = distance_miles / fuel_gallons if fuel_gallons > 0 else None
+
+        data.append({
+            "start_time": start_time,
+            "end_time": end_time,
+            "start_location": trip.get("startLocation"),
+            "end_location": trip.get("endLocation"),
+            "distance_miles": distance_miles,
+            "duration_min": duration_min,
+            "fuel_gallons": fuel_gallons,
+            "mpg": mpg
+        })
+
+    df = pd.DataFrame(data)
+    if df.empty:
+        print(f"No trips found in the past {days} days.")
+        return df, None
+
+    df["date"] = df["start_time"].dt.strftime("%m-%d-%Y")
+    daily_summary = df.groupby("date").agg(
+        total_trips=("distance_miles", "count"),
+        total_miles=("distance_miles", "sum"),
+        avg_duration_min=("duration_min", "mean"),
+        total_fuel_gallons=("fuel_gallons", "sum"),
+        avg_mpg=("mpg", "mean")
+    ).reset_index()
+
+    # Display summary
+    print(f"Fleet Summary for Past {days} Days ({start.strftime('%m-%d-%Y')} → {now.strftime('%m-%d-%Y')} Phoenix time):")
+    print(daily_summary)
+    print("\nOverall Totals:")
+    print(f"  Total Trips: {len(df)}")
+    print(f"  Total Miles: {df['distance_miles'].sum():.2f}")
+    print(f"  Average Trip Duration: {df['duration_min'].mean():.2f} min")
+    print(f"  Estimated Fuel Used: {df['fuel_gallons'].sum():.2f} gallons")
+    print(f"  Average Fleet MPG: {df['mpg'].mean():.2f}")
+
+    return df, daily_summary
+
+# ---------------------------
+# VISUALIZATION
+# ---------------------------
+def plot_fleet_summary(daily_summary):
+    sns.set_style("whitegrid")
+    fig, ax = plt.subplots(3, 1, figsize=(14, 12))
+
+    # Total miles per day
+    sns.barplot(ax=ax[0], data=daily_summary, x='date', y='total_miles', color='green')
+    ax[0].set_title("Daily Total Miles")
+    ax[0].set_ylabel("Miles")
+    ax[0].set_xlabel("Date")
+    ax[0].tick_params(axis='x', rotation=45)
+
+    # Total fuel per day
+    sns.barplot(ax=ax[1], data=daily_summary, x='date', y='total_fuel_gallons', color='blue')
+    ax[1].set_title("Daily Fuel Used")
+    ax[1].set_ylabel("Gallons")
+    ax[1].set_xlabel("Date")
+    ax[1].tick_params(axis='x', rotation=45)
+
+    # Average MPG per day
+    sns.lineplot(ax=ax[2], data=daily_summary, x='date', y='avg_mpg', marker='o', color='orange')
+    ax[2].set_title("Daily Average MPG")
+    ax[2].set_ylabel("MPG")
+    ax[2].set_xlabel("Date")
+    ax[2].tick_params(axis='x', rotation=45)
+
+    plt.tight_layout()
+    plt.show()
+
+# ---------------------------
+# MAIN
+# ---------------------------
+if __name__ == "__main__":
+    df, daily_summary = run_fleet_analysis(30)
+    if daily_summary is not None:
+        plot_fleet_summary(daily_summary)
