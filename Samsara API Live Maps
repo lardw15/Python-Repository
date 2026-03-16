@@ -1,0 +1,72 @@
+#Use of Samsara API and Using Maps
+
+import requests
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderUnavailable
+import folium
+
+# ---------------------------
+# CONFIG
+# ---------------------------
+
+"""
+SECURITY NOTICE
+
+All API tokens, IDs, and credentials in this repository are intentionally
+redacted or replaced with placeholder values. This project originally
+interfaced with live production APIs, but identifiers have been removed
+to comply with security best practices and prevent exposure of sensitive data.
+"""
+API_TOKEN = "REDACTED_API_TOKEN_PLACEHOLDER"
+VEHICLE_ID = "REDACTED_VEHICLE_ID_PLACEHOLDER"
+
+# ---------------------------
+# Fetch all vehicles locations
+# ---------------------------
+url = "https://api.samsara.com/v1/fleet/locations"
+headers = {"Authorization": f"Bearer {API_TOKEN}"}
+
+try:
+    response = requests.get(url, headers=headers)
+    response.raise_for_status()
+    data = response.json()
+
+    # Find your vehicle
+    vehicle = next((v for v in data.get("vehicles", []) if str(v.get("id")) == VEHICLE_ID), None)
+    if not vehicle:
+        print("Vehicle not found in locations data.")
+    else:
+        lat = vehicle.get("latitude")
+        lon = vehicle.get("longitude")
+        print(f"Latest coordinates: {lat}, {lon}")
+
+        # Reverse geocode
+        geolocator = Nominatim(user_agent="vehicle_location_test")
+        try:
+            location = geolocator.reverse((lat, lon), exactly_one=True, timeout=10)
+            if location and "address" in location.raw:
+                city = location.raw["address"].get("city") or location.raw["address"].get("town") or location.raw["address"].get("village")
+                state = location.raw["address"].get("state")
+                print(f"Vehicle is in: {city}, {state}")
+            else:
+                print("Could not determine city/state from coordinates.")
+        except GeocoderUnavailable:
+            print("Geocoder service unavailable. Try again later.")
+
+        # ---------------------------
+        # Show on map
+        # ---------------------------
+        vehicle_map = folium.Map(location=[lat, lon], zoom_start=14)
+        folium.Marker(
+            [lat, lon],
+            popup=f"Last seen: {city}, {state}" if city and state else "Last seen location",
+            tooltip="Vehicle"
+        ).add_to(vehicle_map)
+
+        # Display map (Jupyter/Colab inline)
+        display(vehicle_map)
+
+except requests.exceptions.HTTPError as e:
+    print("Error fetching data:", e)
+except Exception as e:
+    print("Unexpected error:", e)
