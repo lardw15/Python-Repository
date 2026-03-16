@@ -1,0 +1,73 @@
+# Using Samsara API
+
+import requests
+from datetime import datetime, timedelta, timezone
+
+# -----------------------
+# Configuration
+# -----------------------
+
+"""
+SECURITY NOTICE
+
+All API tokens, IDs, and credentials in this repository are intentionally
+redacted or replaced with placeholder values. This project originally
+interfaced with live production APIs, but identifiers have been removed
+to comply with security best practices and prevent exposure of sensitive data.
+"""
+
+API_TOKEN = "REDACTED_API_TOKEN_PLACEHOLDER"
+DRIVER_ID = "REDACTED_VEHICLE_ID_PLACEHOLDER"
+
+# Legacy API endpoint for driver safety score
+url = f"https://api.samsara.com/v1/fleet/drivers/{DRIVER_ID}/safety/score"
+headers = {"Authorization": f"Bearer {API_TOKEN}"}
+
+# -----------------------
+# Calculate timestamps for past 7 days
+# -----------------------
+end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+start_ms = int((datetime.now(timezone.utc) - timedelta(days=7)).timestamp() * 1000)
+
+params = {"startMs": start_ms, "endMs": end_ms}
+
+# -----------------------
+# API Request
+# -----------------------
+r = requests.get(url, headers=headers, params=params)
+
+# -----------------------
+# Process Response
+# -----------------------
+if r.status_code == 200:
+    data = r.json()
+    
+    driver_id = data.get("driverId")
+    
+    # Convert meters to miles (1 mile = 1609.34 m)
+    total_distance_miles = data.get("totalDistanceDrivenMeters", 0) / 1609.34
+    # Convert ms to hours
+    total_time_hours = data.get("totalTimeDrivenMs", 0) / (1000 * 60 * 60)
+    time_over_speed_hours = data.get("timeOverSpeedLimitMs", 0) / (1000 * 60 * 60)
+    
+    print(f"Driver ID: {driver_id}")
+    print(f"Safety Score: {data.get('safetyScore')}")
+    print(f"Safety Rank: {data.get('safetyScoreRank')}")
+    print(f"Total Distance Driven (miles): {total_distance_miles:.2f}")
+    print(f"Total Time Driven (hours): {total_time_hours:.2f}")
+    print(f"Time Over Speed Limit (hours): {time_over_speed_hours:.2f}")
+    print(f"Total Harsh Events: {data.get('totalHarshEventCount')}")
+    
+    # Show harsh events with date and time formatted
+    harsh_events = data.get("harshEvents", [])
+    if not harsh_events:
+        print("No harsh events in the past 7 days.")
+    else:
+        print("\n--- Harsh Events ---")
+        for e in harsh_events:
+            ts = datetime.fromtimestamp(e["timestampMs"]/1000, tz=timezone.utc)
+            date_str = ts.strftime("%m/%d/%Y")
+            time_str = ts.strftime("%I:%M %p")
+            print(f"Date: {date_str} | Time: {time_str} | Type: {e['harshEventType']} | Vehicle ID: {e['vehicleId']}")
+else:
+    print("Error:", r.status_code, r.text)
