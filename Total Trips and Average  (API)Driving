@@ -1,0 +1,77 @@
+# Using Samsara API
+
+import requests
+from datetime import datetime, timedelta, timezone
+
+# ---------------------------
+# CONFIGURATION
+# ---------------------------
+API_TOKEN = "REDACTED_API_TOKEN_PLACEHOLDER"
+VEHICLE_ID = "REDACTED_VEHICLE_ID_PLACEHOLDER"  
+
+headers = {
+    "Authorization": f"Bearer {API_TOKEN}",
+    "Content-Type": "application/json"
+}
+
+# ---------------------------
+# DEFINE PHOENIX TIMEZONE (UTC-7)
+# ---------------------------
+PHOENIX_TZ = timezone(timedelta(hours=-7))
+
+# ---------------------------
+# FUNCTION TO FETCH TRIPS AND CALCULATE AVERAGE DURATION
+# ---------------------------
+def fetch_trips_and_average(vehicle_id, start_date, end_date):
+    startMs = int(start_date.timestamp() * 1000)
+    endMs = int(end_date.timestamp() * 1000)
+
+    trips_url = "https://api.samsara.com/v1/fleet/trips"
+    trips_params = {
+        "vehicleId": vehicle_id,
+        "startMs": startMs,
+        "endMs": endMs,
+        "limit": 1000
+    }
+
+    response = requests.get(trips_url, headers=headers, params=trips_params)
+
+    if response.status_code != 200:
+        print(f"Error fetching trips ({start_date.date()} - {end_date.date()}): "
+              f"{response.status_code} - {response.text}")
+        return 0, 0.0, 0.0
+
+    trips_data = response.json().get("trips", [])
+
+    total_duration = 0
+    total_distance_miles = 0
+    for trip in trips_data:
+        start = trip.get("startMs")
+        end = trip.get("endMs")
+        distance_m = trip.get("distanceMeters", 0)
+        if start and end:
+            duration_minutes = (end - start) / 1000 / 60  # ms → minutes
+            total_duration += duration_minutes
+            total_distance_miles += distance_m / 1609.34  # meters → miles
+
+    trip_count = len(trips_data)
+    average_duration = (total_duration / trip_count) if trip_count > 0 else 0
+
+    return trip_count, average_duration, total_distance_miles
+
+# ---------------------------
+# CALCULATE DATE RANGES IN PHOENIX TIME
+# ---------------------------
+today = datetime.now(PHOENIX_TZ)
+periods = [30, 60, 90]  # days
+
+for days in periods:
+    start_date = today - timedelta(days=days)
+    end_date = today
+    trips, avg_duration, total_distance = fetch_trips_and_average(VEHICLE_ID, start_date, end_date)
+
+    print(f"Past {days} days ({start_date.date()} to {end_date.date()} Phoenix time):")
+    print(f"  Total trips: {trips}")
+    print(f"  Average driving time: {avg_duration:.2f} minutes")
+    print(f"  Total distance traveled: {total_distance:.2f} miles")
+    print("-" * 40)
